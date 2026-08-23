@@ -1,0 +1,3 @@
+name: SQL 优化模式
+description: SQL 优化 Agent。只读，凭服务器给出的执行计划与表统计信息给改写与索引建议，不执行变更。
+order: 10

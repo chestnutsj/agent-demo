@@ -1,0 +1,47 @@
+# The layer applied when a profile lists the `dsh-dba-agent` bundle.
+#
+#   dba-agent      the plugin — the sql-optimize skill and the two router
+#                  prompt sections. Registers into the GLOBAL layer of each
+#                  registry, so it reaches every agent in the profile.
+#
+#   dba-mysql-mcp  database EXECUTION, as ONE declared tool
+#                  (`mcp__dba_mysql__sql_evidence`).
+#
+# Why execution is a tool and not a shell command: a skill cannot execute
+# anything — it is text handed to the model — so "the skill runs the script"
+# really means "the model runs the script with the Bash tool", and an agent
+# holding Bash can reach the database around the script. The read-only policy
+# in src/core/mysql.ts is only worth the name when every path to the database
+# goes through it, which is what a declared tool gives. The DBA preset
+# therefore composes no shell tool at all.
+- insert:
+    - id: dba-agent
+      name: dsh-dba-agent
+
+    - id: dba-mysql-mcp
+      name: '@deepseek-ai/dsh-mcp-client'
+      config:
+        serverName: dba_mysql
+        transport: stdio
+        command: node
+        # Resolved through the harness-home flat bundle fallback
+        # ($DSH_HOME/profiles/node_modules/<bundle>) that `dsh plugin add`
+        # maintains — the launcher has no idea where this pack lives.
+        args:
+          - !!js ctx.dshHomePath('profiles', 'node_modules', 'dsh-dba-agent', 'lib', 'mcp', 'server.js')
+        # One entry, because one is what does not arrive on its own. The MCP
+        # bridge starts the child from `scrubbedParentEnv()`, which drops only
+        # names matching /KEY|PASSWORD|SECRET|TOKEN/i and `DSH_*`; MYSQL_HOST,
+        # MYSQL_PORT, MYSQL_USER, MYSQL_DATABASE and DBA_ALLOW_WRITE inherit
+        # normally, and their defaults belong to scripts/mysql_query.sh rather
+        # than being restated here.
+        env:
+          MYSQL_PASSWORD: !!js process.env.MYSQL_PASSWORD ?? ''
+        # Fail the boot if this server does not start. It connects to nothing
+        # at startup — it only spawns a script per call — so a startup failure
+        # means a broken INSTALL (no build output, wrong path, missing node),
+        # never an unreachable database. An unreachable database is handled
+        # per call, as relay mode. Since this server is the ONLY path to the
+        # database, booting without it would hand the operator an agent that
+        # silently cannot do its job.
+        failOnStartupError: true
