@@ -13,16 +13,25 @@ DeepSeek Harness  ────────────────────�
 dsh-dba-agent  ───────────────────────────────  专家能力包（20%）
         ├── router   两层分类 → 两个系统提示词段落
         ├── skill    方法 → 一个 SKILL.md（只讲方法，不执行）
-        └── tool     执行 → 一个 MCP 工具 → mysql_query.sh → mysql CLI
+        └── tool     执行 → 一个 MCP 工具 → 方言 → 脚本 → 数据库 CLI
 ```
 
-整个包对外的表面就三样：**2 个注入的服务、3 次注册、1 个模型可见的工具。**
+这一版的重点是**框架**，不是领域内容：三张表撑起三个扩展点，每张都是**数据**，
+每张都只填了一行真的实现。
+
+| 表 | 位置 | 现在有什么 |
+|---|---|---|
+| 问题类目 | `src/router/routes.ts` | `sql-optimize` ready，其余三类 planned |
+| 类目 playbook | `src/router/playbooks.ts` | 一条，键就是类目 id |
+| 数据库引擎 | `src/core/engine.ts` | `mysql` 有方言，PG / Oracle / OB 只登记不实现 |
+
+对外表面：**2 个注入的服务、3 次注册、1 个模型可见的工具。**
 
 | | 数量 | 是什么 |
 |---|---|---|
 | `inject` | 2 | `skills`、`systemPrompt` |
 | 注册 | 3 | 1 个技能 + 2 个提示词段落 |
-| 模型可见工具 | 1 | `mcp__dba_mysql__sql_evidence` |
+| 模型可见工具 | 1 | `mcp__dba_sql__sql_evidence` |
 
 ## 两层交付
 
@@ -87,6 +96,39 @@ apply(ctx)
 工具、技能和这个插件在同一个 bundle 层里一起安装，段落能点名的东西在编译期就定死了——
 为此注入一个 `tools` 服务、在每次组装时去问一个只有一个答案的问题，是白买一份启动依赖。
 
+## 三个扩展点
+
+框架的价值在于"加一样东西要改哪几行"是确定的，而且**改漏了会响亮失败**，不会静默降级。
+
+### 加一个问题类目（比如「参数调整」）
+
+1. `src/router/routes.ts` 里那一项改成 `status: 'ready'`，填上 `skill`；
+2. `skills/<skill>/SKILL.md` 写方法；
+3. `src/router/playbooks.ts` 里加一行 `'param-tuning': paramTuningPlaybook`。
+
+漏了第 3 步，插件加载就抛 `route "param-tuning" is ready but has no playbook`；
+漏了第 2 步，技能注册时抛（`SKILL_DIRECTORIES` 是从路由表**推导**的，不是另抄一份列表）。
+反过来写了 playbook 却没把类目改成 ready，抛 `playbook "x" has no ready route`。
+
+### 加一个数据库引擎（比如 PostgreSQL）
+
+1. `src/core/dialects/postgresql.ts` 实现 `EvidenceDialect`——三个方法：
+   `version()`、`explain(statement, analyze)`、`tableSteps(table)`；
+2. `scripts/postgresql_query.sh` 照 `mysql_query.sh` 的约定写：退出码 3 + `DBA_OFFLINE:` 前缀；
+3. `src/core/engine.ts` 里把该引擎的 `status` 改成 `ready`，在 `DIALECTS` 里注册。
+
+**走查的顺序不用重写**：先版本、再计划、再逐表，那是引擎无关的部分，写在
+`src/core/evidence.ts`；每个引擎只回答"这三个问题用什么语句问"。
+
+引擎由部署决定，不由模型选：`DBA_ENGINE`（默认 `mysql`）。模型那边看到的工具名
+`mcp__dba_sql__sql_evidence` **不带引擎**，所以换引擎不用重写任何提示词。配了一个还没实现的
+引擎，工具会带着"只实现了 MySQL"的原因失败，而不是拿 MySQL 的语法去问 Oracle。
+
+### 加一个工具
+
+`src/tools/names.ts` 加名字 → `src/mcp/server.ts` 加 handler → 在 playbook 里点名。
+提示词里出现的工具名必须都是本包提供的，这条有测试守着（`tests/plugin.test.js`）。
+
 ## 注册面：能不申请就不申请
 
 ```ts
@@ -105,7 +147,9 @@ export const inject = ['skills', 'systemPrompt'] as const
 ## 数据库访问：一个工具，不是 shell
 
 ```
-skill (方法论)  →  模型调用  →  mcp__dba_mysql__sql_evidence  →  mysql_query.sh  →  mysql CLI
+skill (方法论)  →  模型调用  →  mcp__dba_sql__sql_evidence
+                                      ↓  engine.ts 按 DBA_ENGINE 选方言
+                                 mysql 方言  →  mysql_query.sh  →  mysql CLI
 ```
 
 **preset 不组装任何 shell 工具，也不提供"随便执行一条 SQL"的入口**，这是整个包最要紧的
@@ -127,15 +171,16 @@ mysqldump、也不能从工作区里翻出那条 SQL。每一项都该是一个�
 ### `sql_evidence`：一次调用，一整份证据
 
 ```
-mcp__dba_mysql__sql_evidence   { "sql": "SELECT ... FROM orders JOIN users ..." }
+mcp__dba_sql__sql_evidence   { "sql": "SELECT ... FROM orders JOIN users ..." }
 ```
 
-按 DBA 实际的顺序走一遍，返回四类信息：
+按 DBA 实际的顺序走一遍，返回四类信息（顺序是引擎无关的，语句由方言给）：
 
-1. `EXPLAIN FORMAT=JSON` 的完整计划；
-2. 语句涉及的每张表（最多 4 张）的 `SHOW CREATE TABLE`；
-3. 每张表的 `SHOW INDEX`；
-4. 每张表的 `table_rows` / `data_length` / `index_length` / `update_time`。
+1. 服务器版本与 `sql_mode`——它决定了哪些改写在这台服务器上**根本不存在**（hash join、CTE、
+   窗口函数、`EXPLAIN ANALYZE` 都是 8.0）；
+2. `EXPLAIN FORMAT=JSON` 的完整计划；
+3. 语句涉及的每张表（最多 4 张）的 `SHOW CREATE TABLE`；
+4. 每张表的 `SHOW INDEX` 与 `table_rows` / `data_length` / `index_length`。
 
 拆成"一个 explain 工具 + 一个查询工具"要四到十次往返，而在那个代价下最容易被跳过的
 恰恰是决定答案的那一步——优化器当时到底有哪些选择。表名从语句文本里取
@@ -192,27 +237,31 @@ dba-agent/
 │   └── install-preset.sh     把 preset 拷进 $DSH_HOME/.agent-presets
 ├── skills/sql-optimize/      只讲方法论：取证、读计划、排建议
 ├── tests/                    node:test，零新依赖
-│   ├── plugin.test.js        注册面：inject 两项、1 技能 + 2 段落
+│   ├── plugin.test.js        注册面：inject 两项、类目与 playbook 配对
+│   ├── engine.test.js        引擎接缝：未实现的引擎必须响亮失败
 │   ├── sql.test.js           取表名、ANALYZE 门禁、离线接力
 │   └── mcp.test.js           起 server 说协议：工具只有一个
 └── src/
-    ├── index.ts              插件入口：inject 两个服务，注册三样东西
-    ├── harness.ts            这两个服务的结构化类型（不依赖 harness 包）
-    ├── skills.ts             SKILL.md 加载与注册
-    ├── router/routes.ts      二级分类表（含 ready / planned 状态）
-    ├── router/section.ts     一级路由段落：是不是数据库工作 + 归哪一类
-    ├── router/sql-optimize.ts 二级 playbook：SQL 优化的固定流程
-    ├── core/mysql.ts         策略、脚本执行、取证走查（只导出 collectSqlEvidence）
-    ├── core/sql.ts           语句文本分析：取表名、EXPLAIN ANALYZE 门禁
-    ├── mcp/server.ts         MCP 传输层：一个工具，core 的薄壳
-    ├── tools/names.ts        工具名常量（提示词与 server 共用）
-    └── tools/README.md       原生 defineTool 迁移方案
+    ├── index.ts               插件入口：inject 两个服务，注册三样东西
+    ├── harness.ts             这两个服务的结构化类型（不依赖 harness 包）
+    ├── skills.ts              SKILL.md 加载与注册（目录从路由表推导）
+    ├── router/routes.ts       ① 二级分类表（ready / planned）
+    ├── router/playbooks.ts    ② 类目 id → playbook 段落，加载时校验配对
+    ├── router/section.ts      一级路由段落：是不是数据库工作 + 归哪一类 + 哪种库
+    ├── router/sql-optimize.ts sql-optimize 那一条 playbook 的正文
+    ├── core/engine.ts         ③ 引擎表 + 方言注册表 + DBA_ENGINE 解析
+    ├── core/dialects/mysql.ts MySQL 方言：版本、EXPLAIN、逐表三条
+    ├── core/evidence.ts       引擎无关：只读策略、走查顺序、一次探测即接力
+    ├── core/sql.ts            语句文本分析：取表名、EXPLAIN ANALYZE 门禁
+    ├── mcp/server.ts          MCP 传输层：一个工具，core 的薄壳
+    ├── tools/names.ts         工具名常量（提示词与 server 共用，不带引擎）
+    └── tools/README.md        原生 defineTool 迁移方案
 ```
 
 ## 验证
 
 ```sh
-npm run check        # build → 类型检查（含未使用检查）→ 16 个测试
+npm run check        # build → 类型检查（含未使用检查）→ 24 个测试
 npm test             # 只跑测试（需要先 npm run build）
 ```
 
@@ -223,7 +272,8 @@ npm test             # 只跑测试（需要先 npm run build）
 
 | 文件 | 守什么 |
 |---|---|
-| `plugin.test.js` | `inject` 只有两项；只注册 1 个技能 + 2 个段落；段落文本是**静态字符串**；提示词里出现的工具名不能超出本包真正提供的那一个 |
+| `plugin.test.js` | `inject` 只有两项；只注册 1 个技能 + 2 个段落；段落文本是**静态字符串**；每个 ready 类目都同时有技能和 playbook；提示词里出现的工具名不能超出本包真正提供的那一个 |
+| `engine.test.js` | 只有一个引擎 ready 且其余仍对路由可见；`DBA_ENGINE` 归一化；已知但未实现的引擎报错要**点名实现了什么**；未知引擎不静默回落到 MySQL |
 | `sql.test.js` | 表名提取（含派生表、注释、字符串字面量、不安全标识符）；`EXPLAIN ANALYZE` 只对 SELECT 放行；连不上时**只出一个** relay block 而不是每步一个 |
 | `mcp.test.js` | 模型实际看到的表面：`tools/list` 只有 `sql_evidence`；OFFLINE 渲染成**成功**结果；analyze 打 DML 被拒 |
 
@@ -231,17 +281,34 @@ npm test             # 只跑测试（需要先 npm run build）
 客户端的机器上，结果都是确定的离线分支。**真库上的取证输出仍未验证**——那条路径要等有
 可连实例时补一个端到端用例。
 
+## 和同类产品的对照
+
+参照过一份 BIC-agent 的说明。它是**内容重**的形态：一个总路由分发到十来个分支
+（文档检索、SQL 合规、SQL 优化、SQL 生成，再加 A–E 五类问答模板），SQL 优化那一支
+按数据库类型加载各自的 advisor（`mysql-sql-optimization-advisor` / `oracle-…` / `pg-…`），
+底下压着一个知识图谱（`kb_graph.py` / `search_kg.py`）。
+
+两处结构值得对齐，这一版对齐了：
+
+- **二级路由按 db type 分方言**——就是上面的 `src/core/engine.ts`；
+- **"版本差异必须标注"**——所以取证第一步就是 `SELECT VERSION()`，而不是让模型假设 8.0。
+
+其余的**刻意没有搬**：24 类等价改写规则、14 项改写前检查、六段报告模板、参数默认值表、
+A–E 输出模板。那些是**领域内容**，不是框架；而且其中相当一部分（知识图谱检索、案例库）
+依赖这个包没有的检索后端。这一版要的是骨架立住、接缝清楚，内容后填。
+
 ## 下一步
 
-1. **工具迁到原生 `defineTool`** — 见 `src/tools/README.md`。拿到参数校验、
-   `output.render` 与 `tools/pre-execute` 门禁，同时去掉一个子进程；`src/core/mysql.ts`
-   就是为这次迁移准备的，换的是壳不是逻辑。
-2. **实现「运行时诊断」类目** — 它现在是 `planned`。缺的是现场取证：processlist、
-   `innodb_trx`、`data_lock_waits`、PENDING 的元数据锁，一次走完。加一个工具、一个技能、
-   一段 playbook，路由表里把 `status` 改成 `ready`。
-3. **实现「参数调整」类目** — 缺的是基线：`SHOW GLOBAL STATUS` 前后采样、
-   `performance_schema` 的等待事件、变量与实例规格的对照。没有这些就只能报经验值，
-   而经验值正是这个包不想给的东西。
-4. **子 agent** — 等第二个类目 `ready` 之后才有意义：一个 `tool-subagent` 行绑一个
-   persona 到一个工具名，再在路由表里加回 `subagent` 字段。只有一个领域时，委派给自己
-   只是多一层开销。
+1. **往框架里填内容** — 三个扩展点各自的第一块内容：`sql-optimize` 技能里补等价改写的
+   前置条件（`NOT IN`→`NOT EXISTS` 要求关联列 NOT NULL 这一类）、固定的输出结构。
+   这些都是改 `SKILL.md`，不动代码。
+2. **实现「参数调整」或「运行时诊断」类目** — 按上面「加一个问题类目」三步走。缺的都是
+   采集端：诊断要 processlist / `innodb_trx` / 锁等待，参数要 `SHOW GLOBAL STATUS` 前后采样。
+   没有采集就只能报经验值，而经验值正是这个包不想给的东西。
+3. **实现第二个引擎** — 按上面「加一个数据库引擎」三步走。第二个方言落地那天，才算真正
+   证明这个接缝是对的。
+4. **工具迁到原生 `defineTool`** — 见 `src/tools/README.md`。拿到参数校验、`output.render`
+   与 `tools/pre-execute` 门禁，同时去掉一个子进程；`src/core/evidence.ts` 就是为这次迁移
+   准备的，换的是壳不是逻辑。
+5. **子 agent** — 等第二个类目 `ready` 之后才有意义。只有一个领域时，委派给自己只是多一
+   层开销。

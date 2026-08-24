@@ -4,8 +4,10 @@
 #                  prompt sections. Registers into the GLOBAL layer of each
 #                  registry, so it reaches every agent in the profile.
 #
-#   dba-mysql-mcp  database EXECUTION, as ONE declared tool
-#                  (`mcp__dba_mysql__sql_evidence`).
+#   dba-sql-mcp    database EXECUTION, as ONE declared tool
+#                  (`mcp__dba_sql__sql_evidence`). The server name carries no
+#                  engine: which dialect it collects with is `DBA_ENGINE`,
+#                  resolved in src/core/engine.ts (MySQL today).
 #
 # Why execution is a tool and not a shell command: a skill cannot execute
 # anything — it is text handed to the model — so "the skill runs the script"
@@ -18,10 +20,10 @@
     - id: dba-agent
       name: dsh-dba-agent
 
-    - id: dba-mysql-mcp
+    - id: dba-sql-mcp
       name: '@deepseek-ai/dsh-mcp-client'
       config:
-        serverName: dba_mysql
+        serverName: dba_sql
         transport: stdio
         command: node
         # Resolved through the harness-home flat bundle fallback
@@ -32,9 +34,10 @@
         # One entry, because one is what does not arrive on its own. The MCP
         # bridge starts the child from `scrubbedParentEnv()`, which drops only
         # names matching /KEY|PASSWORD|SECRET|TOKEN/i and `DSH_*`; MYSQL_HOST,
-        # MYSQL_PORT, MYSQL_USER, MYSQL_DATABASE and DBA_ALLOW_WRITE inherit
-        # normally, and their defaults belong to scripts/mysql_query.sh rather
-        # than being restated here.
+        # MYSQL_PORT, MYSQL_USER, MYSQL_DATABASE, DBA_ALLOW_WRITE and
+        # DBA_ENGINE inherit normally, and their defaults belong to
+        # scripts/mysql_query.sh and src/core/engine.ts rather than being
+        # restated here.
         env:
           MYSQL_PASSWORD: !!js process.env.MYSQL_PASSWORD ?? ''
         # Fail the boot if this server does not start. It connects to nothing

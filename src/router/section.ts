@@ -21,6 +21,7 @@
 // per assembly would buy a `tools` injection and answer a question that has
 // only one answer.
 
+import { ENGINES, READY_ENGINES } from '../core/engine.js'
 import type { PluginContext } from '../harness.js'
 import { MCP_TOOL_PREFIX } from '../tools/names.js'
 import { ROUTES } from './routes.js'
@@ -56,6 +57,14 @@ const ROUTER_TEXT = [
   '## 第二步：归入哪一类',
   '',
   ...ROUTES.map(routeLine),
+  '',
+  '',
+  '## 还有一个维度：数据库类型',
+  '',
+  `取证工具只实现了 ${READY_ENGINES.map(engine => engine.title).join(' / ')}。`
+  + `${ENGINES.filter(engine => engine.status === 'planned').map(engine => engine.title).join(' / ')} 等`
+  + '虽然认得，但没有对应的取证实现——遇到这些直说"这个数据库本版本还没实现"，',
+  '不要用通用 SQL 经验代替那个引擎的执行计划：不同优化器对同一条语句的最优计划可能相反。',
   '',
   '一次只走一类。判不准就问用户，不要同时按两类做。',
   '标着**未实现**的类目：明确告诉用户这一类本版本还没做，说清楚缺的是什么',

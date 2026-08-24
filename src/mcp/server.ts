@@ -11,16 +11,17 @@
 // `defineTool` registration later swaps the transport, not the logic
 // (src/tools/README.md).
 //
-// DSH's in-box MCP client surfaces the tool as `mcp__dba_mysql__sql_evidence`;
+// DSH's in-box MCP client surfaces the tool as `mcp__dba_sql__sql_evidence`;
 // that name lives in src/tools/names.ts, shared with the prompt section that
-// tells the model to call it.
+// tells the model to call it. The name carries no engine — which dialect the
+// walk uses is `DBA_ENGINE`, resolved in src/core/engine.ts.
 //
 // Built to lib/mcp/server.js.
 
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import { z } from 'zod'
-import { collectSqlEvidence } from '../core/mysql.js'
+import { collectSqlEvidence } from '../core/evidence.js'
 import { TOOL } from '../tools/names.js'
 
 /** An MCP tool result carrying one text block. */

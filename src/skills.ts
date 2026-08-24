@@ -8,6 +8,7 @@
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import type { PluginContext, SkillRegistration } from './harness.js'
+import { ROUTES } from './router/routes.js'
 
 /** A parsed SKILL.md: its `key: value` frontmatter plus the markdown body. */
 interface ParsedSkill {
@@ -69,12 +70,18 @@ function loadSkill(dirName: string): SkillRegistration {
 }
 
 /**
- * The skill directories this pack ships — one per `ready` route in
- * `src/router/routes.ts`. A `planned` route has no skill on purpose: the
- * router tells the model to say the class is unimplemented, and a skill would
- * contradict that.
+ * The skill directories this pack ships — DERIVED from the route table, one
+ * per `ready` class. Deriving rather than listing removes a drift source: a
+ * class cannot be marked ready with its method left unregistered. A `planned`
+ * class names no skill on purpose — the router tells the model to say the
+ * class is unimplemented, and a skill would contradict that.
  */
-export const SKILL_DIRECTORIES = ['sql-optimize'] as const
+export const SKILL_DIRECTORIES: readonly string[] = ROUTES
+  .filter(route => route.status === 'ready')
+  .map((route) => {
+    if (route.skill === undefined) throw new Error(`route "${route.id}" is ready but names no skill`)
+    return route.skill
+  })
 
 /**
  * Register every shipped skill into the shared catalog.

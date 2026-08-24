@@ -5,19 +5,25 @@
 //
 //   router      → two prompt levels: "is this database work, and which kind"
 //                 (src/router/section.ts), then the playbook for the class
-//                 that owns it (src/router/sql-optimize.ts)
+//                 that owns it (src/router/playbooks.ts)
 //   skills      → how to do the work, as instructions rather than as code
-//   tools       → one MySQL tool, mounted by cordis.patch.yml as an MCP server
+//   tools       → one evidence tool, mounted by cordis.patch.yml as an MCP
+//                 server, collecting through the engine's dialect
 //
-// This version implements ONE route, SQL optimization. Everything the pack
-// registers serves it; the other classes are listed in the route table as
-// unimplemented so the model says so instead of improvising.
+// Three tables carry the extension points, and each one is DATA:
+//   src/router/routes.ts    the classes (SQL 优化 / 参数调整 / …)
+//   src/router/playbooks.ts route id → its level-two section
+//   src/core/engine.ts      the database engines and their dialects
+//
+// This version implements ONE class (SQL optimization) on ONE engine (MySQL).
+// Everything else is listed as `planned` so the model says so instead of
+// improvising an answer the pack cannot support with evidence.
 //
 // Built to lib/index.js.
 
 import type { PluginContext } from './harness.js'
 import { registerRouter } from './router/section.js'
-import { registerRoutePlaybooks } from './router/sql-optimize.js'
+import { registerRoutePlaybooks } from './router/playbooks.js'
 import { registerSkills } from './skills.js'
 
 export const name = 'dsh-dba-agent'

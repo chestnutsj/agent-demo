@@ -10,13 +10,13 @@ when-to-use: 问题聚焦在某一条具体语句上，而不是服务器整体�
 完全相反；文本层面看着"少了个索引"的查询，真实计划里往往是隐式类型转换或者中间列的范围
 条件把复合索引截断了。
 
-数据库访问只有 `mcp__dba_mysql__sql_evidence` 这一个工具——没有 shell，也没有"随便执行一条
+数据库访问只有 `mcp__dba_sql__sql_evidence` 这一个工具——没有 shell，也没有"随便执行一条
 SQL"的入口。被优化的语句只会跟在 `EXPLAIN` 后面跑。
 
 ## 1. 取证
 
 ```
-mcp__dba_mysql__sql_evidence   { "sql": "<不带 EXPLAIN 的语句>" }
+mcp__dba_sql__sql_evidence   { "sql": "<不带 EXPLAIN 的语句>" }
 ```
 
 一次返回一份证据包：

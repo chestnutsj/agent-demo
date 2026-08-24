@@ -6,8 +6,15 @@
 // drift: a prompt naming a tool that is not registered sends the model at
 // nothing.
 
-/** Prefix DSH's in-box MCP client adds to a server's tool names. */
-export const MCP_TOOL_PREFIX = 'mcp__dba_mysql__'
+/**
+ * Prefix DSH's in-box MCP client adds to a server's tool names.
+ *
+ * Engine-NEUTRAL (`dba_sql`, not `dba_mysql`): the engine is a deployment
+ * choice resolved in `src/core/engine.ts`, and the prompt sections that name
+ * this tool are static text. Binding the engine into the tool name would mean
+ * rewriting every prompt the day a second dialect lands.
+ */
+export const MCP_TOOL_PREFIX = 'mcp__dba_sql__'
 
 /** Base tool names, as the model will see them once the tools are native. */
 export const TOOL = {

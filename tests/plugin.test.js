@@ -59,14 +59,32 @@ test('the router classifies first and names every class', () => {
   // the model says so instead of answering from general MySQL folklore.
   assert.equal(router.text.match(/\*\*本版本未实现\*\*/g).length, 3)
 
-  assert.match(playbook.text, /mcp__dba_mysql__sql_evidence/)
+  assert.match(playbook.text, /mcp__dba_sql__sql_evidence/)
   assert.match(playbook.text, /先取证|取证。/)
 })
 
 test('the prompt names no tool the pack does not ship', () => {
   const named = new Set()
   for (const section of register().sections) {
-    for (const match of section.text.matchAll(/mcp__dba_mysql__(\w+)/g)) named.add(match[1])
+    for (const match of section.text.matchAll(/mcp__dba_sql__(\w+)/g)) named.add(match[1])
   }
   assert.deepEqual([...named], ['sql_evidence'])
+})
+
+test('every implemented class has both a skill and a playbook', () => {
+  // The registry checks this at load; asserting it here names the failure.
+  const { skills, sections } = register()
+  const playbooks = sections
+    .filter(section => section.name.startsWith('dba:route:'))
+    .map(section => section.name.slice('dba:route:'.length))
+
+  assert.deepEqual(playbooks, ['sql-optimize'])
+  assert.deepEqual(skills.map(skill => skill.name), playbooks)
+})
+
+test('the router names the engine dimension, not just the question classes', () => {
+  const [router] = register().sections
+  assert.match(router.text, /数据库类型/)
+  assert.match(router.text, /MySQL/)
+  assert.match(router.text, /PostgreSQL/)
 })

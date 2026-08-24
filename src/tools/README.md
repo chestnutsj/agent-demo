@@ -18,7 +18,7 @@ nothing about either transport.
 | Argument validation | zod, inside the server | derived from `parameters`, at the registry boundary |
 | Model-facing rendering | one text block | `output.render` over a canonical value |
 | Policy | inside the tool body | `tools/pre-execute` gate + monotonic `ctx.tools.guard()` |
-| Tool names | `mcp__dba_mysql__sql_evidence` | `sql_evidence` |
+| Tool names | `mcp__dba_sql__sql_evidence` | `sql_evidence` |
 | Process boundary | a child process per server | in-process |
 
 Going native also drops the child process and the `tools` injection this pack

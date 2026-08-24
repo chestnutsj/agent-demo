@@ -7,7 +7,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { analyzeRefusal, extractTables, normalizeStatement } from '../lib/core/sql.js'
-import { collectSqlEvidence } from '../lib/core/mysql.js'
+import { collectSqlEvidence } from '../lib/core/evidence.js'
 
 process.env.MYSQL_HOST = '127.0.0.1'
 process.env.MYSQL_PORT = '1'
@@ -52,8 +52,13 @@ test('an unreachable server relays the whole walk once', async () => {
   assert.equal(report.offline, true)
   assert.match(report.text, /^DBA_OFFLINE: /)
   assert.match(report.text, /--- 请执行 ---[\s\S]*--- 结束 ---/)
-  // The plan plus three statements for the one table it touches.
+  // Version, then the plan, then three statements for the one table.
+  assert.match(report.text, /SELECT VERSION\(\)/)
   assert.match(report.text, /EXPLAIN FORMAT=JSON SELECT \* FROM orders/)
+  assert.ok(
+    report.text.indexOf('SELECT VERSION()') < report.text.indexOf('EXPLAIN FORMAT=JSON'),
+    'version comes first: it decides which rewrites exist on this server',
+  )
   assert.match(report.text, /SHOW CREATE TABLE `orders`;/)
   assert.match(report.text, /SHOW INDEX FROM `orders`;/)
   assert.match(report.text, /information_schema\.tables/)

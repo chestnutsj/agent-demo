@@ -1,31 +1,27 @@
-// The transport-agnostic MySQL core: policy, execution, and the one walk.
+// The evidence walk: policy, execution, and the order the questions are asked.
 //
-// Only `collectSqlEvidence` leaves this module. Everything the pack can do to
-// a database is composed here, so the read-only policy has exactly one place
-// to sit and a second transport cannot arrive with a weaker one.
+// Engine-NEUTRAL on purpose. What to ask a server is the dialect's business
+// (`./dialects/mysql.ts`, selected through `./engine.ts`); this module owns
+// the parts that do not change with the engine — the read-only policy, the
+// one-probe-then-relay behaviour, and the rendering.
 //
-// The actual database access lives in `scripts/*.sh`, which shell out to the
-// `mysql` client: one place for connection handling, credential hygiene, and
-// the OFFLINE relay. Nothing connects at startup — a call spawns a script.
-//
-// This module is what every in-process caller goes through to run them: the
-// MCP server today (`src/mcp/server.ts`), the native `defineTool` layer
-// tomorrow (`src/tools/README.md`). The statement policy lives here rather
-// than in either transport, so a second transport cannot arrive with a
-// weaker one.
+// Only `collectSqlEvidence` leaves the module, so every path to a database is
+// composed here and a second transport cannot arrive with a weaker policy.
+// The database access itself lives in `scripts/*.sh`, which shell out to a
+// client: one place for connection handling, credential hygiene, and the
+// OFFLINE relay. Nothing connects at startup — a call spawns a script.
 
 import { spawn } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
+import { dialectFor } from './engine.js'
+import type { EvidenceStep } from './engine.js'
 import { MAX_EVIDENCE_TABLES, analyzeRefusal, extractTables, normalizeStatement } from './sql.js'
 
 /** Resolve a script that ships at the package root under `scripts/`. */
 function scriptPath(name: string): string {
-  // Built to lib/core/mysql.js, so the package root is two levels up.
+  // Built to lib/core/evidence.js, so the package root is two levels up.
   return fileURLToPath(new URL(`../../scripts/${name}`, import.meta.url))
 }
-
-/** The one script this pack runs: a single statement, with relay on failure. */
-const QUERY_SCRIPT_PATH = scriptPath('mysql_query.sh')
 
 /**
  * Exit code the scripts use for OFFLINE: the server could not be reached, and
@@ -76,15 +72,16 @@ function policyRefusal(sql: string): string | undefined {
 }
 
 /**
- * Run one SQL statement through the script. Never rejects: a spawn failure
- * comes back as `code: -1` with the reason in `stderr`, so every caller has
- * one shape to render.
+ * Run one SQL statement through the engine's script. Never rejects: a spawn
+ * failure comes back as `code: -1` with the reason in `stderr`, so every
+ * caller has one shape to render.
+ * @param script - the script name under `scripts/`, from the dialect.
  * @param sql - the statement to execute.
  * @returns the captured exit code and streams.
  */
-function runQuery(sql: string): Promise<QueryResult> {
+function runQuery(script: string, sql: string): Promise<QueryResult> {
   return new Promise((resolve) => {
-    const child = spawn('bash', [QUERY_SCRIPT_PATH, sql], { env: process.env })
+    const child = spawn('bash', [scriptPath(script), sql], { env: process.env })
     let stdout = ''
     let stderr = ''
     child.stdout.on('data', (chunk: Buffer) => { stdout += chunk.toString() })
@@ -101,18 +98,14 @@ function runQuery(sql: string): Promise<QueryResult> {
 // rather than in a script because choosing the follow-up statements means
 // reading table names out of the statement, which bash does badly (`./sql.ts`).
 
-/** One titled statement in an evidence walk. */
-interface EvidenceStep {
-  readonly title: string
-  readonly sql: string
-}
-
 /** Options for one evidence walk. */
 export interface EvidenceOptions {
   /** Use `EXPLAIN ANALYZE`, which EXECUTES the statement, instead of a plan estimate. */
   readonly analyze?: boolean
   /** Most tables to collect schema, indexes and size for. */
   readonly maxTables?: number
+  /** Engine to collect for; defaults to the one the deployment configured. */
+  readonly engine?: string
 }
 
 /** The outcome of an evidence walk, rendered for the model. */
@@ -126,34 +119,25 @@ export interface EvidenceReport {
 /**
  * Build the statement list one SQL-optimization walk runs.
  *
- * The plan comes first because it is the step that decides the answer; the
- * per-table steps exist to make the plan READABLE — a full scan is only a
- * finding once the table's size and indexes say what the optimizer had to
- * choose from.
+ * The order is the engine-neutral part, and it is the part that matters:
+ * version first (it decides which recommendations exist at all), then the
+ * plan (it decides the answer), then the tables (they make the plan readable —
+ * a full scan is only a finding once size and indexes say what the optimizer
+ * had to choose from). Which statements express those questions is the
+ * dialect's business.
  * @param sql - the statement being optimized.
- * @param options - analyze mode and the table cap.
+ * @param options - analyze mode, the table cap, and the engine.
  * @returns the ordered steps, each safe to hand to `runQuery`.
  */
 function sqlEvidencePlan(sql: string, options: EvidenceOptions = {}): EvidenceStep[] {
+  const dialect = dialectFor(options.engine)
   const statement = normalizeStatement(sql)
-  const analyze = options.analyze === true
-  const steps: EvidenceStep[] = [{
-    title: analyze ? '执行计划（EXPLAIN ANALYZE，已实际执行）' : '执行计划（EXPLAIN FORMAT=JSON）',
-    sql: `EXPLAIN ${analyze ? 'ANALYZE ' : 'FORMAT=JSON '}${statement};`,
-  }]
-
+  const steps: EvidenceStep[] = [
+    dialect.version(),
+    dialect.explain(statement, options.analyze === true),
+  ]
   for (const table of extractTables(statement, options.maxTables ?? MAX_EVIDENCE_TABLES)) {
-    const scope = table.schema === undefined ? 'DATABASE()' : `'${table.schema}'`
-    steps.push(
-      { title: `${table.quoted} 的建表语句`, sql: `SHOW CREATE TABLE ${table.quoted};` },
-      { title: `${table.quoted} 的索引`, sql: `SHOW INDEX FROM ${table.quoted};` },
-      {
-        title: `${table.quoted} 的规模`,
-        sql: 'SELECT table_rows, data_length, index_length, auto_increment, update_time'
-          + ` FROM information_schema.tables WHERE table_schema = ${scope}`
-          + ` AND table_name = '${table.table}';`,
-      },
-    )
+    steps.push(...dialect.tableSteps(table))
   }
   return steps
 }
@@ -194,12 +178,13 @@ export async function collectSqlEvidence(sql: string, options: EvidenceOptions =
     if (refusal !== undefined) throw new Error(refusal)
   }
 
+  const dialect = dialectFor(options.engine)
   const steps = sqlEvidencePlan(statement, options)
   const sections: string[] = []
   for (const [index, step] of steps.entries()) {
     const refusal = policyRefusal(step.sql)
     if (refusal !== undefined) throw new Error(refusal)
-    const { code, stdout, stderr } = await runQuery(step.sql)
+    const { code, stdout, stderr } = await runQuery(dialect.script, step.sql)
     if (code === OFFLINE_EXIT_CODE) {
       const reason = /^DBA_OFFLINE:\s*(.*)$/m.exec(stdout)?.[1] ?? '连不到数据库'
       return { text: relayBlock(reason, steps), offline: true }
