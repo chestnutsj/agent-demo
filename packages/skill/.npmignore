@@ -1,0 +1,3 @@
+# Empty on purpose: prevents npm from falling back to .gitignore when packing.
+# The published file set is controlled by the "files" allowlist in package.json,
+# so the build-synced scripts/ (git-ignored) is still included in `npm pack`.

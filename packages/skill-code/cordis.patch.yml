@@ -1,0 +1,10 @@
+# 方法4:代码注册 skill(对照方法3 的纯 .md filesystem 方式)
+- insert:
+    - id: dba-skill-code
+      name: dsh-dba-skill-code
+      config:
+        host: 192.168.5.117
+        # port: 3306
+        # user: root
+        # password: ''
+        # database: mysql

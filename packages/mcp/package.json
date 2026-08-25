@@ -1,0 +1,27 @@
+{
+  "name": "dsh-dba-mcp",
+  "version": "0.1.0",
+  "description": "DSH plugin: an MCP stdio server exposing the `mysql_query` tool, backed by scripts/mysql_query.sh.",
+  "type": "module",
+  "main": "lib/mcp/server.js",
+  "files": [
+    "lib",
+    "cordis.patch.yml",
+    "scripts"
+  ],
+  "scripts": {
+    "sync": "mkdir -p scripts && cp ../../scripts/mysql_query.sh scripts/mysql_query.sh",
+    "build": "npm run sync && tsc -p tsconfig.json && npm run gen:patch",
+    "gen:patch": "sed \"s#- !!js ctx.dshHomePath([^)]*)#- $PWD/lib/mcp/server.js#\" cordis.patch.yml > cordis.patch.local.yml",
+    "clean": "rm -rf lib scripts cordis.patch.local.yml"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.29.0",
+    "zod": "^4.4.3"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  }
+}

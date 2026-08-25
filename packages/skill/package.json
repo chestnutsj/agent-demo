@@ -1,0 +1,24 @@
+{
+  "name": "dsh-dba-skill",
+  "version": "0.1.0",
+  "description": "DSH plugin: registers the `mysql-query` skill; the model runs scripts/mysql_query.sh via the Bash tool.",
+  "type": "module",
+  "main": "lib/index.js",
+  "files": [
+    "lib",
+    "cordis.patch.yml",
+    "scripts",
+    "skills"
+  ],
+  "scripts": {
+    "sync": "mkdir -p scripts && cp ../../scripts/mysql_query.sh scripts/mysql_query.sh",
+    "build": "npm run sync && tsc -p tsconfig.json && npm run gen:patch",
+    "gen:patch": "sed -e \"s#name: dsh-dba-skill#name: $PWD/lib/index.js#\" -e \"s#- !!js ctx.dshHomePath([^)]*)#- $PWD/skills#\" cordis.patch.yml > cordis.patch.local.yml",
+    "clean": "rm -rf lib scripts cordis.patch.local.yml"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  }
+}

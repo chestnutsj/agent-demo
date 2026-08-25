@@ -1,0 +1,12 @@
+node_modules/
+lib/
+dist/
+packages/*/scripts/
+.claude/
+.vscode/
+.DS_Store
+.idea
+*.log
+
+# 本机临时启动用的 patch(build 生成,绝对路径,勿提交)
+packages/*/cordis.patch.local.yml

@@ -1,0 +1,34 @@
+# Layer applied when a profile lists the `dsh-dba-skill` bundle.
+#
+# Method 1 of 3 — SKILL, loaded by dsh's OWN filesystem provider.
+#
+# Two entries:
+#   1. dba-skill-fs — a scoped `@deepseek-ai/dsh-skill-filesystem` instance that
+#      discovers this bundle's skills/ dir (the mysql-query SKILL.md). dsh parses
+#      and validates the skill itself, so we never call ctx.skills.register().
+#   2. dba-skill — this bundle's tiny plugin whose only job is env injection
+#      (MYSQL_* from config, plus QUERY_SH = the bundled script's absolute path).
+- insert:
+    - id: dba-skill-fs
+      name: '@deepseek-ai/dsh-skill-filesystem'
+      config:
+        # A distinct provider name so this instance doesn't collide with the
+        # profile's default "filesystem" provider.
+        providerName: dba
+        includeDefaultRoots: false
+        customSkillDirs:
+          # After `dsh plugin add`, the skills/ dir ships inside the installed
+          # bundle; resolve it there. `gen:patch` rewrites this to the repo's
+          # absolute skills/ path for temp (--patch) launches.
+          - !!js ctx.dshHomePath('profiles', 'node_modules', 'dsh-dba-skill', 'skills')
+    - id: dba-skill
+      name: dsh-dba-skill
+      # 单连接配置(全部可选)。优先级:此处配置 > MYSQL_* 环境变量 > 脚本默认值。
+      # 插件把已设置的字段桥接进 process.env,模型 Bash 作为子进程继承,
+      # 因此模型无需知道具体连接参数。留空则回落到环境变量,不破坏现有用法。
+      config:
+        host: 192.168.5.117
+        # port: 3306
+        # user: root
+        # password: ''
+        # database: mysql

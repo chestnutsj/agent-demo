@@ -1,0 +1,19 @@
+{
+  "name": "dsh-dba-plugins",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Demo DSH plugins: one MySQL DBA capability (scripts/mysql_query.sh) packaged three ways — Skill, MCP server, and a directly-registered Tool — as three independent installable packages.",
+  "type": "module",
+  "scripts": {
+    "build": "pnpm -r build",
+    "clean": "pnpm -r clean && rm -rf dist",
+    "pack:skill": "mkdir -p dist && pnpm --filter dsh-dba-skill exec npm pack --pack-destination ../../dist",
+    "pack:mcp": "mkdir -p dist && pnpm --filter dsh-dba-mcp exec npm pack --pack-destination ../../dist",
+    "pack:tool": "mkdir -p dist && pnpm --filter dsh-dba-tool exec npm pack --pack-destination ../../dist",
+    "pack:all": "npm run build && npm run pack:skill && npm run pack:mcp && npm run pack:tool"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "typescript": "^5.6.0"
+  }
+}

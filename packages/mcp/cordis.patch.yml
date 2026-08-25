@@ -1,0 +1,33 @@
+# Layer applied when a profile lists the `dsh-dba-mcp` bundle.
+#
+# Method 2 of 3 — MCP server.
+# Mounts the in-box MCP client to launch the bundled stdio server
+# (lib/mcp/server.js). Its tool appears to the model as
+# `mcp__dba_mysql__mysql_query`. The server path is resolved through the
+# harness-home flat bundle fallback ($DSH_HOME/profiles/node_modules/<bundle>)
+# that `dsh plugin add` maintains.
+- insert:
+    - id: dba-mysql-mcp
+      name: '@deepseek-ai/dsh-mcp-client'
+      config:
+        serverName: dba_mysql
+        transport: stdio
+        command: node
+        args:
+          - !!js ctx.dshHomePath('profiles', 'node_modules', 'dsh-dba-mcp', 'lib', 'mcp', 'server.js')
+        # Connection settings for the mysql client the script calls. The MCP
+        # bridge scrubs credential-like ambient vars before launching the child,
+        # so pass what the server needs explicitly here.
+        #
+        # This patch.yml IS the config file, so per-field you pick the priority:
+        #   - pin a static value  -> config wins   (e.g. MYSQL_HOST: 192.168.1.10)
+        #   - keep the form below  -> env fallback  (shell MYSQL_*, then default)
+        # The default template keeps the env-fallback form so nothing breaks.
+        env:
+          MYSQL_HOST: !!js process.env.MYSQL_HOST ?? '192.168.5.117'
+          MYSQL_PORT: !!js process.env.MYSQL_PORT ?? '3306'
+          MYSQL_USER: !!js process.env.MYSQL_USER ?? 'root'
+          MYSQL_PASSWORD: !!js process.env.MYSQL_PASSWORD ?? ''
+          MYSQL_DATABASE: !!js process.env.MYSQL_DATABASE ?? 'mysql'
+        # A demo should not abort the whole boot if mysql is unreachable.
+        failOnStartupError: false

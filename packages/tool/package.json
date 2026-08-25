@@ -1,0 +1,26 @@
+{
+  "name": "dsh-dba-tool",
+  "version": "0.1.0",
+  "description": "DSH plugin: directly registers the `mysql_query` tool via ctx.tools.register(); runs scripts/mysql_query.sh in-process.",
+  "type": "module",
+  "main": "lib/index.js",
+  "files": [
+    "lib",
+    "cordis.patch.yml",
+    "scripts"
+  ],
+  "scripts": {
+    "sync": "mkdir -p scripts && cp ../../scripts/mysql_query.sh scripts/mysql_query.sh",
+    "build": "npm run sync && tsc -p tsconfig.json && npm run gen:patch",
+    "gen:patch": "sed \"s#name: dsh-dba-tool#name: $PWD/lib/index.js#\" cordis.patch.yml > cordis.patch.local.yml",
+    "clean": "rm -rf lib scripts cordis.patch.local.yml"
+  },
+  "dependencies": {
+    "zod": "^4.4.3"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  }
+}
