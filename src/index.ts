@@ -6,9 +6,14 @@
 //   router      → two prompt levels: "is this database work, and which kind"
 //                 (src/router/section.ts), then the playbook for the class
 //                 that owns it (src/router/playbooks.ts)
-//   skills      → how to do the work, as instructions rather than as code
 //   tools       → one evidence tool, mounted by cordis.patch.yml as an MCP
 //                 server, collecting through the engine's dialect
+//
+// The METHOD is a SKILL.md under `skills/`, but no code here loads it:
+// cordis.patch.yml mounts `@deepseek-ai/dsh-skill-filesystem` against this
+// package's `skills/` directory. That built-in already parses frontmatter,
+// registers the provider and watches the files — an in-package loader would
+// be a worse copy that also needs a rebuild to pick up an edit.
 //
 // Three tables carry the extension points, and each one is DATA:
 //   src/router/routes.ts    the classes (SQL 优化 / 参数调整 / …)
@@ -24,18 +29,19 @@
 import type { PluginContext } from './harness.js'
 import { registerRouter } from './router/section.js'
 import { registerRoutePlaybooks } from './router/playbooks.js'
-import { registerSkills } from './skills.js'
 
 export const name = 'dsh-dba-agent'
 
 /**
- * Services this pack registers into; the loader waits for both.
+ * The one service this pack registers into.
  *
- * Two, and every entry earns it: a declared injection is a startup dependency,
- * so injecting `tools` merely to ask whether a tool is visible — or to hang an
- * audit listener — would make the plugin wait on a registry it never writes to.
+ * A declared injection is a startup dependency the loader must wait for, so
+ * the list is exactly what this code writes to. `skills` left it when skill
+ * loading moved to the built-in filesystem provider; `tools` never belonged —
+ * asking whether a tool is visible, or hanging an audit listener, is not
+ * writing to that registry.
  */
-export const inject = ['skills', 'systemPrompt'] as const
+export const inject = ['systemPrompt'] as const
 
 /**
  * Register this pack's contributions. Every registration is an effect owned by
@@ -43,7 +49,6 @@ export const inject = ['skills', 'systemPrompt'] as const
  * @param ctx - the plugin context supplied by the loader.
  */
 export function apply(ctx: PluginContext): void {
-  registerSkills(ctx)
   registerRouter(ctx)
   registerRoutePlaybooks(ctx)
 }
