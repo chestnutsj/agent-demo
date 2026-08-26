@@ -1,0 +1,21 @@
+{
+  "name": "dsh-sql-optimizer",
+  "version": "0.1.0",
+  "description": "DSH plugin: a SQL-optimization subagent over the in-box spawn provider.",
+  "type": "module",
+  "main": "lib/index.js",
+  "files": [
+    "lib",
+    "cordis.patch.yml"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json && sed \"s#name: dsh-sql-optimizer#name: $PWD/lib/index.js#\" cordis.patch.yml > cordis.patch.local.yml",
+    "clean": "rm -rf lib cordis.patch.local.yml",
+    "typecheck": "tsc -p tsconfig.json --noEmit --noUnusedLocals --noUnusedParameters"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  }
+}

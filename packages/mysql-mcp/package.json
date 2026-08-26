@@ -1,0 +1,26 @@
+{
+  "name": "dsh-mysql-mcp",
+  "version": "0.1.0",
+  "description": "DSH plugin: an MCP stdio server exposing MySQL execute_sql.",
+  "type": "module",
+  "main": "lib/server.js",
+  "files": [
+    "lib",
+    "scripts",
+    "cordis.patch.yml"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json && sed \"s#- !!js ctx.dshHomePath([^)]*)#- $PWD/lib/server.js#\" cordis.patch.yml > cordis.patch.local.yml",
+    "clean": "rm -rf lib cordis.patch.local.yml",
+    "typecheck": "tsc -p tsconfig.json --noEmit --noUnusedLocals --noUnusedParameters"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.30.0",
+    "zod": "^4.4.3"
+  }
+}

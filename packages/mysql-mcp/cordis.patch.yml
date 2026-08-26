@@ -1,0 +1,16 @@
+- insert:
+    - id: opt-mysql-mcp
+      name: '@deepseek-ai/dsh-mcp-client'
+      config:
+        serverName: mysql
+        transport: stdio
+        command: node
+        args:
+          - !!js ctx.dshHomePath('profiles', 'node_modules', 'dsh-mysql-mcp', 'lib', 'server.js')
+        env:
+          MYSQL_HOST: !!js process.env.MYSQL_HOST ?? '127.0.0.1'
+          MYSQL_PORT: !!js process.env.MYSQL_PORT ?? '3306'
+          MYSQL_USER: !!js process.env.MYSQL_USER ?? 'root'
+          MYSQL_PASSWORD: !!js process.env.MYSQL_PASSWORD ?? ''
+          MYSQL_DATABASE: !!js process.env.MYSQL_DATABASE ?? 'mysql'
+        failOnStartupError: false
