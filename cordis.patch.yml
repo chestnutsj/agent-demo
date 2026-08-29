@@ -1,140 +1,10 @@
-# The layer applied when a profile lists the `dsh-dba-agent` bundle.
+# dsh bundle 补丁：`dsh plugin add` 安装本包后自动套用（无需 --patch）。
+# 把 dba-mode 加进名册并设为默认，同时保留出货的 standard / minimal / code / cordis。
 #
-#   dba-agent      the plugin — the two router prompt sections. Registers into
-#                  the GLOBAL layer, so it reaches every agent in the profile.
-#
-#   dba-skills     the METHOD, as SKILL.md files. Nothing in this package loads
-#                  them: `dsh-skill-filesystem` already parses frontmatter,
-#                  registers a provider and WATCHES the files, so an edit to a
-#                  SKILL.md lands without a rebuild or a restart.
-#
-#   agent-presets  the shipped roster (标准 / PTC / 极简 / 创造), DISABLED —
-#                  see the block at the end of this file.
-#
-#   dba-sql-mcp    database EXECUTION, as ONE declared tool
-#                  (`mcp__dba_sql__sql_evidence`). The server name carries no
-#                  engine: which dialect it collects with is `DBA_ENGINE`,
-#                  resolved in src/core/engine.ts (MySQL today).
-#
-# Why execution is a tool and not a shell command: a skill cannot execute
-# anything — it is text handed to the model — so "the skill runs the script"
-# really means "the model runs the script with the Bash tool", and an agent
-# holding Bash can reach the database around the script. The read-only policy
-# in src/core/evidence.ts is only worth the name when every path to the database
-# goes through it, which is what a declared tool gives. The DBA preset
-# therefore composes no shell tool at all.
-- insert:
-    - id: dba-agent
-      name: dsh-dba-agent
+# 机制：CLI（profile-boot）会在最后强制把 id 为 `agent-presets` 那一行的 roots 覆盖成只有
+# 出货目录，无法收窄。所以这里把它 disable，另插一个自己 id 的 roster 行——CLI 不碰它。它的
+# roots 同时列「本包安装后的 presets」和「出货 presets」，于是 dba-mode 与 standard 都在名册。
 
-    - id: dba-skills
-      name: '@deepseek-ai/dsh-skill-filesystem'
-      config:
-        # A provider name of its own: `filesystem` belongs to the deployment's
-        # own row, and two providers cannot share one name.
-        providerName: dba
-        # An ISOLATED provider — no project root, no user root, no bundled
-        # root. This pack's skills are the ones it ships; picking up whatever
-        # a person left in `<dshHome>/skills` would put uninspected method
-        # into an agent whose whole point is that its answers are traceable.
-        includeDefaultRoots: false
-        customSkillDirs:
-          - !!js ctx.dshHomePath('profiles', 'node_modules', 'dsh-dba-agent', 'skills')
-
-    - id: dba-sql-mcp
-      name: '@deepseek-ai/dsh-mcp-client'
-      config:
-        serverName: dba_sql
-        transport: stdio
-        command: node
-        # Resolved through the harness-home flat bundle fallback
-        # ($DSH_HOME/profiles/node_modules/<bundle>) that `dsh plugin add`
-        # maintains — the launcher has no idea where this pack lives.
-        args:
-          - !!js ctx.dshHomePath('profiles', 'node_modules', 'dsh-dba-agent', 'lib', 'mcp', 'server.js')
-        # One entry, because one is what does not arrive on its own. The MCP
-        # bridge starts the child from `scrubbedParentEnv()`, which drops only
-        # names matching /KEY|PASSWORD|SECRET|TOKEN/i and `DSH_*`; MYSQL_HOST,
-        # MYSQL_PORT, MYSQL_USER, MYSQL_DATABASE, DBA_ALLOW_WRITE and
-        # DBA_ENGINE inherit normally, and their defaults belong to
-        # scripts/mysql_query.sh and src/core/engine.ts rather than being
-        # restated here.
-        env:
-          MYSQL_PASSWORD: !!js process.env.MYSQL_PASSWORD ?? ''
-        # Fail the boot if this server does not start. It connects to nothing
-        # at startup — it only spawns a script per call — so a startup failure
-        # means a broken INSTALL (no build output, wrong path, missing node),
-        # never an unreachable database. An unreachable database is handled
-        # per call, as relay mode. Since this server is the ONLY path to the
-        # database, booting without it would hand the operator an agent that
-        # silently cannot do its job.
-        failOnStartupError: true
-
-# ── the harness's own prompt sections: turned off ────────────────────────────
-#
-# A default session opens with three sections this agent has no use for:
-#
-#   harness:identity  (-100)  "You are an AI agent powered by DeepSeek Harness."
-#   harness:source     (-99)  where the DSH checkout is, and how to use it
-#   app:web-surface    (-98)  the Web GUI, "this page", how to rebuild the shell
-#
-# Every one of them orients the model toward DSH ITSELF — inspecting the
-# checkout, rebuilding the web shell, reading "this GUI". This agent has no
-# shell and no filesystem tools; it cannot do any of it. Leaving the text in
-# costs tokens on every request and invites the model to answer questions about
-# a codebase it cannot open.
-#
-# Neither is hardcoded: both rows expose a switch, so this is configuration
-# rather than suppression.
-#
-# ⚠️ A patch REPLACES `config` wholesale (it does not merge), so each block
-# below restates the keys it must keep. Upstream adding a key to either row
-# would silently drop it here — the price of overriding a config object.
-- id: system-prompt
-  config:
-    # Drops `harness:identity`. The deployment persona goes with it (the base
-    # sets `persona: ''`, the Web bundle overwrites it with a coding-agent
-    # persona) — no loss: `presets/dba/agent.cordis.yml` registers a persona in
-    # the AGENT scope, and a scoped section shadows the global one by name.
-    includeHarnessIdentity: false
-
-- id: web-runtime
-  config:
-    # Drops `harness:source` and `app:web-surface` together — one flag guards
-    # both registrations. It also drops the `DSH_WEB_URL` shell variable, which
-    # this preset has no shell to read.
-    surfaceContext: false
-    # Restated, not changed: `config` is replaced, and losing these would stop
-    # the browser from opening and the URL line from printing.
-    openBrowser: !!js ctx.webStartup.openBrowser
-    printUrl: true
-    trustedHosts: !!js ctx.webStartup.trustedHosts
-
-# ── the preset roster: replaced, not extended ────────────────────────────────
-#
-# Installing this bundle turns the profile into a SQL-optimization appliance:
-# the session picker offers this pack's mode and nothing else.
-#
-# Why replace rather than filter: `ctx.agentPresets.list()` re-reads its roots
-# on every call and has no allow/deny seam — no event, no config field. The one
-# lever is the ROOT SET, and `apps/cli/src/profile-boot.ts` force-overwrites
-# `roots` on the row named `agent-presets` AFTER every patch layer, so that row
-# can never be narrowed. A second roster row can: same plugin, own id, own
-# roots, and the app's override does not name it.
-#
-# The disabled row still exists in the composed entry list, so the CLI's
-# override still lands on it — on a row that mounts nothing. That is the whole
-# trick, and it is why the row is disabled rather than removed.
-#
-# Ordering: this layer must apply AFTER the app bundle that inserts
-# `agent-presets` (the shipped `dsh.profile.bundles` order does this; `dsh
-# plugin add` appends). Applied first, the patch warns "entry not found" and is
-# skipped — the roster would then be the shipped one and the picker would show
-# every mode. `dsh --profile <name> --dump-config` shows which won.
-#
-# To get the ordinary modes back: `dsh plugin remove dsh-dba-agent`, or drop
-# these two blocks — this pack then contributes a mode only if its preset is
-# copied into `$DSH_HOME/.agent-presets`, beside the shipped ones.
 - id: agent-presets
   disabled: true
 
@@ -142,18 +12,16 @@
     - id: dba-agent-presets
       name: '@deepseek-ai/dsh-agent-presets'
       config:
-        # The one preset this deployment offers; the id is the directory name
-        # under `presets/`.
-        default: dba
-        # `system` trust: read-only in the UI. A preset IS a composition, so an
-        # appliance that exists to keep an agent inside one tool surface must
-        # not hand out an editor for that surface. It also means no "copy this
-        # preset" button — authoring needs a `user` root, and there is none.
-        roots:
-          - path: !!js ctx.dshHomePath('profiles', 'node_modules', 'dsh-dba-agent', 'presets')
-            trust: system
-        # No `$DSH_HOME/.agent-presets`. That root is the roster's own default
-        # and is where a person (or an agent) authors compositions — leaving it
-        # on would let anything written there reappear in the picker, which is
-        # exactly what this block exists to prevent.
+        default: dba-mode
         includeUserRoot: false
+        roots:
+          # 本包被 `dsh plugin add` 装到 $DSH_HOME/profiles/node_modules/dsh-dba-agent。
+          - path: !!js dshHomePath('profiles', 'node_modules', 'dsh-dba-agent', 'presets')
+            trust: system
+          # 出货 preset 目录（standard 等）；换机器时用 DSH_SHIPPED_PRESETS 覆盖。
+          - path: !!js process.env.DSH_SHIPPED_PRESETS ?? '/usr/local/lib/node_modules/@deepseek-ai/dsh/config/agent-presets'
+            trust: system
+
+    # 本包自身作为插件加载（lib/index.js）：注册 /sql-optimizer 命令。
+    - id: dba-command
+      name: dsh-dba-agent

@@ -1,0 +1,3 @@
+name: DBA 模式
+description: 数据库 SQL 优化助手，仅挂载 mysql-optimize 一个工具。
+order: 0

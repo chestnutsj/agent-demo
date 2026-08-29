@@ -1,0 +1,2 @@
+# 故意留空：阻止 npm 在打包时回退到 .gitignore。发布内容由 package.json 的 "files"
+# 白名单控制，因此 git-ignore 的 lib/（tsc 构建产物）仍会被 `npm pack` 收进去。
