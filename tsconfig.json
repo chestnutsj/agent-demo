@@ -10,7 +10,16 @@
     "skipLibCheck": true,
     "types": ["node"],
     "outDir": "lib",
-    "rootDir": "src"
+    "rootDir": "src",
+
+    // 源码用 .ts 扩展名互相 import，tsc 出包时改写成 .js（harness 自己也是这个写法）。
+    // 好处是 tests/ 可以让 Node 直接跑 src/*.ts，不必先 build 出 lib/。
+    "allowImportingTsExtensions": true,
+    "rewriteRelativeImportExtensions": true,
+    // Node 的类型擦除只删注解、不做转换，所以源码里不能出现 enum / namespace /
+    // 参数属性，类型 import 也必须写 `import type`。这两个开关把规则交给 tsc 守。
+    "erasableSyntaxOnly": true,
+    "verbatimModuleSyntax": true
   },
   "include": ["src/**/*.ts"]
 }

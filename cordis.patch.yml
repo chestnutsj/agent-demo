@@ -22,6 +22,11 @@
           - path: !!js process.env.DSH_SHIPPED_PRESETS ?? '/usr/local/lib/node_modules/@deepseek-ai/dsh/config/agent-presets'
             trust: system
 
-    # 本包自身作为插件加载（lib/index.js）：注册 /sql-optimizer 命令。
+    # 本包自身作为插件加载（lib/index.js）：注册 /sql-optimizer 命令，并挂上证据门禁。
+    #
+    # 这里刻意不写 config：门禁查的工具名和 SKILL.md 里点名的工具名必须是同一份，那份
+    # 就是 src/config.ts 的 DEFAULTS。toolbox 的 tools/list 确认后改 DEFAULTS，不要在这里
+    # 另抄一份——抄了就会出现「提示词说调 A、台账查 B」。真要按部署覆盖时才加 config，
+    # 可用键见 src/config.ts 的 Config。
     - id: dba-command
       name: dsh-dba-agent
