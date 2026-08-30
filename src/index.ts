@@ -1,9 +1,13 @@
 // dsh-dba-agent 插件：注册 /sql-optimizer 命令，并给它配一道证据门禁。
 //
-// 命令执行时把 SQL 优化流程（skills/sql-optimize/SKILL.md 的正文，工具名占位符已按
-// config 渲染）一次性注入当前会话，同时给这个 agent 开一本台账。此后每次工具返回都记
-// 一笔；回合收尾时（agent/turn-stopping）检查硬要求是否都成功返回过，没有就 steer 顶
-// 回去再跑一步。
+// 命令执行时给这个 agent 开一本台账；SQL 优化流程（skills/sql-optimize/SKILL.md 的正文，
+// 工具名占位符已按 config 渲染）随即以系统提示词分区的形式对该 agent 生效，正文不进对话
+// 历史。命令后面跟的那句话是用户自己敲的，原样作为 user 消息发进去起一个回合。此后每次
+// 工具返回都记一笔；回合收尾时（agent/turn-stopping）检查硬要求是否都成功返回过，没有就
+// steer 顶回去再跑一步。
+//
+// 为什么流程走 systemPrompt.section 而不是 systemPrompt.context：后者的产物是一条 user 角色
+// 的快照消息，等于把整篇流程塞进对话历史；section 只进系统提示词，模型看得见、历史里没有。
 //
 // 为什么终点检查挂在 turn-stopping 而不是 pre-execute：本流程的终点是「模型输出报告
 // 并结束回合」，不是一次工具调用，pre-execute 根本拦不到它。
@@ -24,18 +28,27 @@ import type { Ledger } from './ledger.ts'
 import { readSkill, renderSkill } from './skill.ts'
 
 export const name = 'dsh-dba-agent'
-export const inject = ['commands'] as const
+export const inject = ['commands', 'systemPrompt'] as const
 
 export type { Config } from './config.ts'
 
 const SKILL_PATH = fileURLToPath(new URL('../skills/sql-optimize/SKILL.md', import.meta.url))
+
+// 分区排序：dsh 的约定是 -100 harness 身份、0 部署 persona、100–199 工具指引。流程排在
+// persona 之后、工具指引之前——它是对 persona 的展开，不是对某个工具的用法说明。
+const SECTION_ORDER = 50
+
+/** 消息来源：插件自己说的话（门禁顶回去那条），或用户在命令后面敲的原话。 */
+type MessageSource =
+  | { kind: 'plugin'; plugin: string; form: 'notice'; summary: string }
+  | { kind: 'user' }
 
 /** 注入用的 user 消息，形状与 dsh createUserMessage 的产物一致。 */
 interface InjectedMessage {
   id: string
   role: 'user'
   content: { type: 'text'; text: string }[]
-  source: { kind: 'plugin'; plugin: string; form: 'notice'; summary: string }
+  source: MessageSource
 }
 
 /** 命令处理结果（UI 文本，不进模型历史）。 */
@@ -59,6 +72,8 @@ interface CommandInvocation {
 interface CommandDefinition {
   name: string
   description: string
+  /** 自由输入提示。声明了它，客户端才会把命令的参数交回给用户敲。 */
+  input?: { hint: string }
   handler(invocation: CommandInvocation): CommandResult
 }
 
@@ -79,9 +94,22 @@ interface TurnStopping {
   turn: number
 }
 
+/** 一次系统提示词装配的上下文（仅用到的子集）。诊断装配没有 agent。 */
+interface AssembleContextLike {
+  agent?: AgentLike
+}
+
+/** 一段系统提示词分区（仅用到的子集）。 */
+interface PromptSectionLike {
+  name: string
+  order: number
+  text(context: AssembleContextLike): string
+}
+
 /** 本插件用到的 DSH 插件上下文子集。 */
 interface PluginContext {
   commands: { register(definition: CommandDefinition): unknown }
+  systemPrompt: { section(section: PromptSectionLike): unknown }
   on(event: 'tools/result', listener: (exec: ToolExecutionLike, result: ToolResultLike) => void): unknown
   on(event: 'agent/turn-stopping', listener: (payload: TurnStopping) => void): unknown
   logger?: { info?(message: string): void; debug?(message: string): void }
@@ -110,6 +138,16 @@ function pluginUserMessage(text: string, summary: string): InjectedMessage {
   })
 }
 
+/** 用户在命令后面敲的原话。来源标 user，因为那确实是用户说的。 */
+function userMessage(text: string): InjectedMessage {
+  return deepFreeze({
+    id: globalThis.crypto.randomUUID(),
+    role: 'user',
+    content: [{ type: 'text', text }],
+    source: { kind: 'user' },
+  })
+}
+
 /** 日志里只出现工具名，不出现 SQL——台账本来也不存参数。 */
 function missingNames(items: readonly { tool: string }[]): string {
   return items.map(item => item.tool).join(',')
@@ -123,9 +161,20 @@ export function apply(ctx: PluginContext, config: Config = {}): void {
 
   const ledgers = new WeakMap<AgentLike, Ledger>()
 
+  // 流程正文只对入册过的 agent 生效，每次装配重新求值。ledgers 只增不删（再次执行命令是
+  // 换一本新台账，不是销号），所以分区一旦生效就不会中途闪断。
+  ctx.systemPrompt.section({
+    name: 'dba:sql-optimize',
+    order: SECTION_ORDER,
+    text: context => (context.agent !== undefined && ledgers.has(context.agent) ? skill : ''),
+  })
+
   ctx.commands.register({
     name: 'sql-optimizer',
     description: '优化一条 MySQL SQL：取证执行计划与表统计 → 定位瓶颈 → 按代价给出改写与索引建议 → 交回可执行变更',
+    // 声明 input 是「选中命令后还能接着打字」的开关：没有 input 的命令在客户端菜单里选中
+    // 即执行，用户没有地方写 SQL。
+    input: { hint: '<要优化的 SQL 或诉求>' },
     handler: (invocation: CommandInvocation): CommandResult => {
       if (skill === '') {
         return { kind: 'success', text: 'SQL 优化流程尚未配置（skills/sql-optimize/SKILL.md 正文为空）。' }
@@ -136,8 +185,12 @@ export function apply(ctx: PluginContext, config: Config = {}): void {
       ledger.enrolled = true
       ledgers.set(invocation.agent, ledger)
       ctx.logger?.debug?.(`[${name}] enrolled via command, required=${missingNames(settings.requirements.filter(r => r.hard))}`)
-      invocation.agent.followup(pluginUserMessage(skill, 'SQL 优化流程'))
-      return { kind: 'success', text: '已加载 SQL 优化流程。' }
+      const request = invocation.rawInput.trim()
+      // 空参数只入册、不起回合：流程分区这时已经对该 agent 生效，用户下一条普通消息照样
+      // 归门禁管，没必要先空转一个回合。
+      if (request === '') return { kind: 'success', text: '已进入 SQL 优化流程，把要优化的 SQL 发过来。' }
+      invocation.agent.followup(userMessage(request))
+      return { kind: 'success', text: '已进入 SQL 优化流程。' }
     },
   })
 

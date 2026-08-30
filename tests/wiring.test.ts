@@ -6,7 +6,13 @@ import { apply } from '../src/index.ts'
 const TOOLS = resolveSettings().tools
 
 interface Captured {
-  command: { name: string; description: string; handler(invocation: unknown): { kind: string; text?: string } }
+  command: {
+    name: string
+    description: string
+    input?: { hint: string }
+    handler(invocation: unknown): { kind: string; text?: string }
+  }
+  section: { name: string; order: number; text(context: unknown): string }
   result(exec: unknown, result: unknown): void
   stopping(payload: unknown): void
   logs: string[]
@@ -17,6 +23,7 @@ function harness(config = {}): Captured {
   const captured = { logs: [] as string[] } as Partial<Captured> & { logs: string[] }
   const ctx = {
     commands: { register: (definition: unknown) => { captured.command = definition as Captured['command'] } },
+    systemPrompt: { section: (section: unknown) => { captured.section = section as Captured['section'] } },
     on: (event: string, listener: unknown) => {
       if (event === 'tools/result') captured.result = listener as Captured['result']
       else if (event === 'agent/turn-stopping') captured.stopping = listener as Captured['stopping']
@@ -48,16 +55,57 @@ function fakeAgent() {
 const ok = { isError: false }
 const failed = { isError: true, error: 'connection refused' }
 
-test('注册的命令叫 sql-optimizer，注入渲染后的流程正文', () => {
+// input 一旦掉了，客户端菜单里选中命令就直接执行，用户没有地方写 SQL——正是这次要修的
+// 那个行为，所以单独守一条。
+test('注册的命令叫 sql-optimizer，并声明了自由输入提示', () => {
   const h = harness()
   assert.equal(h.command.name, 'sql-optimizer')
+  assert.equal(typeof h.command.input?.hint, 'string')
+  assert.ok((h.command.input?.hint ?? '').trim().length > 0)
+})
+
+test('流程正文走系统提示词分区：入册前为空，入册后是渲染过的正文', () => {
+  const h = harness()
+  const { agent } = fakeAgent()
+  assert.equal(h.section.text({ agent }), '')
+  h.command.handler({ agent, rawInput: '' })
+  const text = h.section.text({ agent })
+  assert.ok(text.includes(TOOLS.plan))
+  assert.ok(!text.includes('{{tool:'))
+})
+
+test('装配上下文没有 agent（诊断装配）时分区为空', () => {
+  const h = harness()
+  const { agent } = fakeAgent()
+  h.command.handler({ agent, rawInput: '' })
+  assert.equal(h.section.text({}), '')
+})
+
+test('分区只对入册过的 agent 生效', () => {
+  const h = harness()
+  const first = fakeAgent()
+  const second = fakeAgent()
+  h.command.handler({ agent: first.agent, rawInput: '' })
+  assert.ok(h.section.text({ agent: first.agent }).includes(TOOLS.plan))
+  assert.equal(h.section.text({ agent: second.agent }), '')
+})
+
+test('空参数只入册，不起回合', () => {
+  const h = harness()
   const { agent, followups } = fakeAgent()
   const outcome = h.command.handler({ agent, rawInput: '' })
   assert.equal(outcome.kind, 'success')
+  assert.deepEqual(followups, [])
+})
+
+test('命令后面的话原样作为 user 消息发进去，不夹带流程正文', () => {
+  const h = harness()
+  const { agent, followups } = fakeAgent()
+  h.command.handler({ agent, rawInput: ' 优化这条SQL select 1;  ' })
   assert.equal(followups.length, 1)
-  assert.equal(followups[0]!.kind, 'plugin')
-  assert.ok(followups[0]!.text.includes(TOOLS.plan))
-  assert.ok(!followups[0]!.text.includes('{{tool:'))
+  assert.equal(followups[0]!.kind, 'user')
+  assert.equal(followups[0]!.text, '优化这条SQL select 1;')
+  assert.ok(!followups[0]!.text.includes(TOOLS.plan))
 })
 
 test('没跑过命令的 agent 收尾时不被检查', () => {
